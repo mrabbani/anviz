@@ -1,6 +1,6 @@
 <?php
 
-require 'anviz.class';
+require 'Anviz.php';
 
 $client = new Anviz('client', 1, 5010, '192.168.1.185');
 
