@@ -121,6 +121,9 @@ class Anviz {
 
         $res = strtoupper(dechex($crc));
 
+        //if crc has length less than 4 add leading zero
+        $res = $this->padHex($res, 4);
+
         return($res[2] . $res[3] . $res[0] . $res[1]);
     }
 
@@ -186,20 +189,23 @@ class Anviz {
     private function requestBuilder($command, $data = '') {
         //first byte should always be A5
         $request = 'A5';
-
+        echo $request . PHP_EOL;
         //add device id
         $request .= $this->padHex($this->id, 8);
+        echo $request . PHP_EOL;
 
         //add command
         $request .= $this->padHex($command, 2);
+        echo $request . PHP_EOL;
 
         //add data (can be empty)
         $request .= $this->padHex(strlen($data) / 2, 4); //devide string length by 2 (1 byte 2 chars)
+        echo $request . PHP_EOL;
+
         //if data is not empty add its length
         if ($data != '') {
             $request .= $data;
         }
-
         //at this point request variable should have even number of charactes
         if (strlen($request) % 2 == 1) {
             throw new AnvizException("Request builder failed. Request has odd number of chars");
@@ -208,6 +214,15 @@ class Anviz {
         $request .= $this->tc_crc16(hex2bin($request));
 
         return hex2bin($request);
+    }
+
+    private function hex2str($hex) {
+        $str = '';
+        for ($i = 0; $i < strlen($hex); $i+=2) {
+            $str .= chr(hexdec(substr($hex, $i, 2)));
+        }
+
+        return $str;
     }
 
     /**
@@ -259,7 +274,7 @@ class Anviz {
      * Set date and time
      */
     public function setDateTime() {
-        
+
         //convert data from human readable format to hex values
         $year = $this->padHex(dechex(date('y')), 2);
         $month = $this->padHex(dechex(date('m')), 2);
@@ -286,6 +301,71 @@ class Anviz {
         }
     }
 
+    /**
+     * Get the basic device info 
+     * @return array of data or false 
+     * @throws AnvizException
+     * Data bytes:
+     * 1-8 Firmware
+     * 9-11 Password
+     * 12 Sleep time
+     * 13 Volume
+     * 14 Language
+     * 15 Date / Time Format
+     * 16 Attendance state
+     * 17 Command Version
+     */
+    public function getDeviceInfo() {
+
+        $request = $this->requestBuilder(self::getInfo);
+        socket_write($this->client, $request);
+
+        $response = bin2hex(socket_read($this->client, 2024));
+
+        $bytes = str_split($response, 2);
+
+        $return = array();
+
+        if ($bytes[7] == self::ACK_SUCCESS) { //date and time are set successfully
+            $data = array_slice($bytes, 9, -2);
+            //get firmware
+            $return['firmware'] = $this->hex2str(implode(array_slice($data, 0, 8)));
+            //communication password and its length
+            $return['password_length'] = bindec(substr(hex2bin($data[8]), 4));
+
+            //password = first 4 bits of 9th byte + 10th byte + 11th byte
+            $return['password'] = bindec(substr(hex2bin($data[8]), 0, 4) . hex2bin($data[9]) . hex2bin($data[10]));
+
+            //sleep time
+            $return['sleep_time'] = hexdec($data[11]);
+
+            //volume
+            $return['volume'] = hexdec($data[12]);
+
+            //language
+            $return['language'] = Parser::parseLanguage(hexdec($data[13]));
+
+            //datetimeformat
+            $return['date_format'] = Parser::parseDateFormat(bindec(substr(hex2bin($data[14]), 4)));
+            $return['time_format'] = Parser::parseTimeFormat(bindec(substr(hex2bin($data[14]), 0, 4)));
+
+            //attendance state
+            $return['attendance_state'] = hexdec($data[15]);
+
+            //language setting flag -- if true user can modify menu language
+            $return['language_setting_flag'] = (bool) hexdec($data[16]);
+
+            //command version -- whatever that means
+            $return['command_version'] = hexdec($data[17]);
+
+            return $return;
+        } else if ($bytes[7] == self::ACK_FAIL) { //request probably came to device but, device wasn't able to process request
+            return false;
+        } else { //error happened
+            throw new AnvizException("An error occured while setting date and time. Device possibly turned off or network is down");
+        }
+    }
+
 }
 
 /**
@@ -296,6 +376,68 @@ class AnvizException extends Exception {
 
     public function errorMessage() {
         return $this->getMessage() . "<br>\n";
+    }
+
+}
+
+/**
+ * parse device codes to human readable format
+ */
+class Parser {
+
+    /**
+     * 
+     * @param dec $code
+     * @return string
+     */
+    public static function parseLanguage($code) {
+        switch ($code) {
+            case 0:
+                return "Simplified Chinese";
+            case 1:
+                return "Traditional Chinese";
+            case 2:
+                return "English";
+            case 3:
+                return "French";
+            case 4:
+                return "Spanish";
+            case 5:
+                return "Portuguese";
+            // ...
+            case 15:
+                return "Croatian";
+        }
+    }
+
+    /**
+     * 
+     * @param dec $code
+     * @return string
+     */
+    public static function parseDateFormat($code) {
+        switch ($code) {
+            case 0:
+                return "Chinese yyyy-mm-dd";
+            case 1:
+                return "America mm-dd, yyyy";
+            case 2:
+                return "English d/m/yy";
+        }
+    }
+    
+    /**
+     * 
+     * @param dec $code
+     * @return string
+     */
+    public static function parseTimeFormat($code) {
+        switch ($code) {
+            case 0:
+                return "24 hours";
+            case 1:
+                return "12 hours (AM/PM)";
+        }
     }
 
 }
