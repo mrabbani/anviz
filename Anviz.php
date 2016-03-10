@@ -198,18 +198,15 @@ class Anviz {
     private function requestBuilder($command, $data = '') {
         //first byte should always be A5
         $request = 'A5';
-        echo $request . PHP_EOL;
+
         //add device id
         $request .= $this->padHex($this->id, 8);
-        echo $request . PHP_EOL;
 
         //add command
         $request .= $this->padHex($command, 2);
-        echo $request . PHP_EOL;
 
         //add data (can be empty)
         $request .= $this->padHex(strlen($data) / 2, 4); //devide string length by 2 (1 byte 2 chars)
-        echo $request . PHP_EOL;
 
         //if data is not empty add its length
         if ($data != '') {
