@@ -1,10 +1,9 @@
 <?php
 
 class Anviz {
-    
+
     const ACK_SUCCESS = '00'; //0x00 indcate success operation
     const ACK_FAIL = '01'; //0x01 indcate failed operation
-    
     const getInfo = '30';   //Get firmware version, comunication password, sleep time, volume, language, date and time format, attendace state, language setting flag, command version
     const setInfo = '31';   //Set above
     const getInfo2 = '32';  //Get compare precission, Fixed wiegand Head code, Wiegand option, Work code permission, real-time mode setting ...
@@ -12,9 +11,13 @@ class Anviz {
     const getDateTime = '38'; //Get the date and time of T&A
     const setDateTime = '39'; //Set the date and time of T&A
 
-    //init crc table
+    /**
+     * An instance of crc table
+     * @var crc_table
+     * @access protected
+     */
 
-    var $crc_table = [
+    protected $crc_table = [
         0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF, 0x8C48, 0x9DC1,
         0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7, 0x1081, 0x0108, 0x3393, 0x221A,
         0x56A5, 0x472C, 0x75B7, 0x643E, 0x9CC9, 0x8D40, 0xBFDB, 0xAE52, 0xDAED, 0xCB64,
@@ -42,7 +45,51 @@ class Anviz {
         0xF78F, 0xE606, 0xD49D, 0xC514, 0xB1AB, 0xA022, 0x92B9, 0x8330, 0x7BC7, 0x6A4E,
         0x58D5, 0x495C, 0x3DE3, 0x2C6A, 0x1EF1, 0x0F78
     ];
-    var $socket = null, $mode = 'client', $id, $port, $ip, $client;
+
+    /**
+     * Socket resource
+     * @var socket
+     * @access protected
+     * Default NULL 
+     */
+    protected $socket = null;
+
+    /**
+     * @var client
+     * @access protected 
+     */
+    protected $client;
+
+    /**
+     * Device communication mode
+     * Values client, server
+     * @var mode
+     * @access public
+     */
+    public $mode = 'client';
+
+    /**
+     * Device ID
+     * Values 1-99999999 
+     * @var id
+     * @access public 
+     */
+    public $id;
+
+    /**
+     * Communication port
+     * Default value 5010
+     * @var port
+     * @access public 
+     */
+    public $port = 5010;
+
+    /**
+     * IP address of either network adapter (client mode) or device (server mode)
+     * @var ip
+     * @access public 
+     */
+    public $ip;
 
     function __construct($mode = 'client', $id, $port = 5010, $ip) {
         $this->mode = $mode;
@@ -53,18 +100,16 @@ class Anviz {
         $this->initSocket();
         $this->client = socket_accept($this->socket);
     }
-    
-    function __destruct(){
+
+    function __destruct() {
         socket_close($this->client);
         $this->socket = null;
     }
 
     /**
-     * 
-     * @global type $crc_table
      * @param bin $b
-     * @return hex (last 2 bytes)
-     * Description: Function for generating last 2 bytes of command
+     * @return hex (2 bytes)
+     * Description: Function for generating last 2 bytes
      */
     function tc_crc16($b) {
         $crc = 0xFFFF;
@@ -79,27 +124,51 @@ class Anviz {
         return($res[2] . $res[3] . $res[0] . $res[1]);
     }
 
+    /**
+     * 
+     * @param string $hex
+     * @param int $length
+     * @return string
+     * @throws AnvizException
+     * Pad the input hex with leading zeroes
+     */
     function padHex($hex, $length) {
-        
-        if($length % 2 == 1){
-            throw new Exception("Hex should be even number");
+
+        if ($length % 2 == 1) {
+            throw new AnvizException("Hex should be even number");
         }
-        
+
         while (strlen($hex) < $length) {
             $hex = '0' . $hex;
         }
 
         return $hex;
     }
-    
-    function padString($string, $length, $pad_char = '0'){
-        while(strlen($string) < $length){
+
+    /**
+     * 
+     * @param string $string
+     * @param int $length
+     * @param string $pad_char
+     * @return string
+     * @throws AnvizException
+     */
+    function padString($string, $length, $pad_char = '0') {
+        if (strlen($string) > $length) {
+            throw new AnvizException("String length is already greater than requested length");
+        }
+
+        while (strlen($string) < $length) {
             $string = $pad_char . $string;
         }
-        
+
         return $string;
     }
 
+    /**
+     * @access private
+     * Create socket and start and start listening
+     */
     private function initSocket() {
         $this->socket = socket_create(AF_INET, SOCK_STREAM, 0);
         socket_bind($this->socket, $this->ip, $this->port);
@@ -107,52 +176,91 @@ class Anviz {
         socket_listen($this->socket);
     }
 
+    /**
+     * 
+     * @param string $command
+     * @param string $data
+     * @return binary
+     * Build a request for given command
+     */
     private function requestBuilder($command, $data = '') {
         //first byte should always be A5
         $request = 'A5';
+
+        //add device id
         $request .= $this->padHex($this->id, 8);
-        
+
+        //add command
         $request .= $this->padHex($command, 2);
-        
-        $request .= $this->padHex(strlen($data) / 2, 4);
-        
-        if($data != ''){
+
+        //add data (can be empty)
+        $request .= $this->padHex(strlen($data) / 2, 4); //devide string length by 2 (1 byte 2 chars)
+        //if data is not empty add its length
+        if ($data != '') {
             $request .= $data;
         }
-        
+
+        //at this point request variable should have even number of charactes
+        if (strlen($request) % 2 == 1) {
+            throw new AnvizException("Request builder failed. Request has odd number of chars");
+        }
+
         $request .= $this->tc_crc16(hex2bin($request));
+
         return hex2bin($request);
     }
 
+    /**
+     * Function for getting date and time from devie
+     * @return time or false on error
+     * Bytes:
+     * 9  - year
+     * 10 - month
+     * 11 - day
+     * 12 - hour
+     * 13 - minute
+     * 14 - second
+     */
     public function getDateTime() {
+        //write command to socket
         socket_write($this->client, $this->requestBuilder(self::getDateTime));
-        
+
+        //read answer
         $response = bin2hex(socket_read($this->client, 2024));
-        
+
+        //split response into bytes
         $bytes = str_split($response, 2);
-        
-        foreach($bytes as $key => $value){
+
+        //convert hex data to decimal values
+        foreach ($bytes as $key => $value) {
             $bytesDec[$key] = hexdec($value);
         }
-        
-        if($bytes[7] == self::ACK_SUCCESS){
+
+        if ($bytes[7] == self::ACK_SUCCESS) { //response ok, device returned data
+            //convert data to human readable format
             $year = '20' . $bytesDec[9];
             $month = $this->padString($bytesDec[10], 2);
             $day = $this->padString($bytesDec[11], 2);
             $hour = $this->padString($bytesDec[12], 2);
             $minute = $this->padString($bytesDec[13], 2);
             $second = $this->padString($bytesDec[14], 2);
-            
+
             $dateTime = sprintf('%d-%d-%d %d:%d:%d', $year, $month, $day, $hour, $minute, $second);
-            
-            return strtotime($dateTime);
-        } else {
+
+            return $dateTime;
+        } else if ($bytes[7] == self::ACK_FAIL) { //response came to the device but device failed to read data
             return false;
+        } else { //error happened
+            throw new AnvizException("An error occured while reading date and time. Device possibly turned off or network is down");
         }
-        
     }
-    
-    public function setDateTime(){
+
+    /**
+     * Set date and time
+     */
+    public function setDateTime() {
+        
+        //convert data from human readable format to hex values
         $year = $this->padHex(dechex(date('y')), 2);
         $month = $this->padHex(dechex(date('m')), 2);
         $day = $this->padHex(dechex(date('d')), 2);
@@ -160,11 +268,34 @@ class Anviz {
         $minute = $this->padHex(dechex(date('i')), 2);
         $second = $this->padHex(dechex(date('s')), 2);
 
+        //build the request and then write it to socket
         socket_write($this->client, $this->requestBuilder(self::setDateTime, $year . $month . $day . $hour . $minute . $second));
-    
+
+        //get response
         $response = bin2hex(socket_read($this->client, 2024));
-        
-        echo $response;
+
+        //split response into bytes
+        $bytes = str_split($response, 2);
+
+        if ($bytes[7] == self::ACK_SUCCESS) { //date and time are set successfully
+            return true;
+        } else if ($bytes[7] == self::ACK_FAIL) { //request probably came to device but, device wasn't able to process request
+            return false;
+        } else { //error happened
+            throw new AnvizException("An error occured while setting date and time. Device possibly turned off or network is down");
+        }
+    }
+
+}
+
+/**
+ * Anviz exception handler
+ * @package Anviz
+ */
+class AnvizException extends Exception {
+
+    public function errorMessage() {
+        return $this->getMessage() . "<br>\n";
     }
 
 }
