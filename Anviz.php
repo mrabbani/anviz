@@ -1,5 +1,14 @@
 <?php
 
+/**
+ * Anviz - class to communicate with anviz devices
+ * PHP version  5
+ * @link https://github.com/jtisler/anviz
+ * @author Jerko Tišler (jtisler) <jerko.tisler@gmail.com>
+ * @copyright (c) 2016, Jerko Tišler
+ * 
+ */
+
 class Anviz {
 
     const ACK_SUCCESS = '00'; //0x00 indcate success operation
