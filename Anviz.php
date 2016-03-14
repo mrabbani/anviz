@@ -215,6 +215,9 @@ class Anviz {
             throw new AnvizException("Request builder failed. Request has odd number of chars");
         }
         $request .= $this->tc_crc16(hex2bin($request));
+        
+        echo $request . PHP_EOL;
+        
         return hex2bin($request);
     }
 
