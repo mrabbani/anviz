@@ -8,7 +8,6 @@
  * @copyright (c) 2016, Jerko Tišler
  * 
  */
-
 class Anviz {
 
     const ACK_SUCCESS = '00'; //0x00 indcate success operation
@@ -206,8 +205,7 @@ class Anviz {
         $request .= $this->padHex($command, 2);
 
         //add data (can be empty)
-        $request .= $this->padHex(strlen($data) / 2, 4); //devide string length by 2 (1 byte 2 chars)
-
+        $request .= $this->padHex(dechex(strlen($data) / 2), 4);
         //if data is not empty add its length
         if ($data != '') {
             $request .= $data;
@@ -216,9 +214,7 @@ class Anviz {
         if (strlen($request) % 2 == 1) {
             throw new AnvizException("Request builder failed. Request has odd number of chars");
         }
-
         $request .= $this->tc_crc16(hex2bin($request));
-
         return hex2bin($request);
     }
 
@@ -321,7 +317,7 @@ class Anviz {
      * 16 Attendance state
      * 17 Command Version
      */
-    public function getDeviceInfo() {
+    public function getDeviceParams() {
 
         $request = $this->requestBuilder(self::getInfo);
         socket_write($this->client, $request);
@@ -370,6 +366,107 @@ class Anviz {
         } else { //error happened
             throw new AnvizException("An error occured while setting date and time. Device possibly turned off or network is down");
         }
+    }
+
+    public function setDeviceParams($password = '', $sleep_time = '', $volume = '', $language = 'FF', $DT_format = 'FF', $attendance_state = 'FF', $language_setting_flag = 'FF') {
+        //currently not working properly
+        if ($password != '') {
+            if (!is_numeric($password)) {
+                throw new AnvizException('Password should be digits only');
+            } else if (strlen($password) > 5) {
+                throw new AnvizException('Password too long, 5 digits max');
+            } else {
+                $passLen = $this->padHex(decbin(strlen($password)), 4);
+
+                $passBin = '';
+
+                for ($i = 0; $i < strlen($password); $i++) {
+                    $passBin .= $this->padHex(decbin($password[$i]), 4);
+                }
+
+
+                $first4bits = substr($passBin, 0, 4);
+
+
+                $passBytes[0] = dechex(bindec($passLen . $first4bits));
+                $passBytes[1] = dechex(bindec(substr($passBin, 4, 8)));
+                $passBytes[2] = dechex(bindec(substr($passBin, 12, 8)));
+
+                $password = implode('', $passBytes);
+            }
+        } else {
+            $password = 'FFFFFF';
+        }
+
+        if ($sleep_time != '') {
+            if (!is_numeric($sleep_time)) {
+                throw new AnvizException("Sleep time must be a number");
+            } else if (!($sleep_time >= 0 && $sleep_time <= 250)) {
+                throw new AnvizException("Sleep time must be between 0-250");
+            } else {
+                $sleep_time = $this->padHex(dechex($sleep_time), 2);
+            }
+        } else {
+            $sleep_time = 'FF';
+        }
+
+        if ($volume != '') {
+            if (!is_numeric($volume)) {
+                throw new AnvizException("Volume must be a number");
+            } else if (!($volume >= 0 && $volume <= 5)) {
+                throw new AnvizException("Volume must be between 0-5");
+            } else {
+                $volume = $this->padHex(dechex($volume), 2);
+            }
+        } else {
+            $volume = 'FF';
+        }
+
+        if ($language != '') {
+            if (!is_numeric($language)) {
+                throw new AnvizException("Language must be a number");
+            } else if (!($language >= 0 && $language <= 15)) {
+                throw new AnvizException("Language must be between 0-5");
+            } else {
+                $language = $this->padHex(dechex($language), 2);
+            }
+        } else {
+            $language = 'FF';
+        }
+
+        if ($attendance_state != '') {
+            if (!is_numeric($attendance_state)) {
+                throw new AnvizException("Attendance state must be a number");
+            } else if (!($attendance_state >= 0 && $attendance_state <= 15)) {
+                throw new AnvizException("Attendance state must be between 0-15");
+            } else {
+                $attendance_state = $this->padHex(dechex($attendance_state), 2);
+            }
+        } else {
+            $attendance_state = 'FF';
+        }
+
+        if ($language_setting_flag != '') {
+            if (!is_bool($language_setting_flag)) {
+                throw new AnvizException("Language setting flag must be a boolean");
+            } else {
+                if ($language_setting_flag == true) {
+                    $language_setting_flag = $this->padHex('10', 2);
+                } else {
+                    $language_setting_flag = $this->padHex('00', 2);
+                }
+            }
+        } else {
+            $language_setting_flag = 'FF';
+        }
+
+
+        $data = $password . $sleep_time . $volume . $language . $DT_format . $attendance_state . $language_setting_flag . '00';
+
+        $request = $this->requestBuilder('31', $data);
+        socket_write($this->client, $request);
+
+        $response = bin2hex(socket_read($this->client, 2024));
     }
 
 }
@@ -431,7 +528,7 @@ class Parser {
                 return "English d/m/yy";
         }
     }
-    
+
     /**
      * 
      * @param dec $code
